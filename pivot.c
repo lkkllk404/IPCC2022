@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <math.h>
 #include <sys/time.h>
+#include <limits.h>
+#include <stdint.h>
 
 static int CompareDouble(const void *a, const void *b)
 {
@@ -9,10 +11,58 @@ static int CompareDouble(const void *a, const void *b)
     return (x > y) - (x < y);
 }
 
+// Typed comparisons avoid qsort's indirect calls in the common path.
+// Recurse on the smaller partition, with a depth-limited qsort fallback.
+static void SortProjection(double *a, int n, int depth)
+{
+    while (n > 16)
+    {
+        if (depth-- == 0)
+        {
+            qsort(a, (size_t)n, sizeof(*a), CompareDouble);
+            return;
+        }
+        double x = a[0], y = a[n / 2], z = a[n - 1];
+        double pivot = x < y ? (y < z ? y : (x < z ? z : x))
+                             : (x < z ? x : (y < z ? z : y));
+        int i = 0, j = n - 1;
+        while (i <= j)
+        {
+            while (a[i] < pivot) ++i;
+            while (a[j] > pivot) --j;
+            if (i <= j)
+            {
+                double tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+                ++i; --j;
+            }
+        }
+        int left = j + 1, right = n - i;
+        if (left < right)
+        {
+            SortProjection(a, left, depth);
+            a += i; n = right;
+        }
+        else
+        {
+            SortProjection(a + i, right, depth);
+            n = left;
+        }
+    }
+    for (int i = 1; i < n; ++i)
+    {
+        double value = a[i];
+        int j = i;
+        while (j > 0 && a[j - 1] > value) { a[j] = a[j - 1]; --j; }
+        a[j] = value;
+    }
+}
+
 // Sum over unordered absolute differences of a sorted scalar projection.
 static double ProjectionSum(double *values, int n)
 {
-    qsort(values, (size_t)n, sizeof(*values), CompareDouble);
+    int depth = 0;
+    for (int size = n; size > 1; size >>= 1) depth += 2;
+    SortProjection(values, n, depth);
     double sum = 0;
     for (int i = 1; i < n; ++i)
         sum += (double)i * (n - i) * (values[i] - values[i - 1]);
@@ -202,20 +252,30 @@ int main(int argc, char *argv[])
         printf("%s file not found.\n", filename);
         return -1;
     }
-    fscanf(file, "%d", &dim);
-    fscanf(file, "%d", &n);
-    fscanf(file, "%d", &k);
+    if (fscanf(file, "%d%d%d", &dim, &n, &k) != 3 || dim < 1 || n < 1 ||
+        k < 1 || k > n || n > INT_MAX / dim || n > INT_MAX / k ||
+        (size_t)n > SIZE_MAX / sizeof(double) / (size_t)n)
+    {
+        fprintf(stderr, "Invalid input dimensions\n");
+        fclose(file);
+        return 1;
+    }
     printf("dim = %d, n = %d, k = %d\n", dim, n, k);
 
     // Read Data
     double *coord = (double *)malloc(sizeof(double) * dim * n);
+    if (!coord) { fprintf(stderr, "Out of memory\n"); fclose(file); return 1; }
     int i;
     for (i = 0; i < n; i++)
     {
         int j;
         for (j = 0; j < dim; j++)
         {
-            fscanf(file, "%lf", &coord[i * dim + j]);
+            if (fscanf(file, "%lf", &coord[i * dim + j]) != 1 || !isfinite(coord[i * dim + j]))
+            {
+                fprintf(stderr, "Invalid coordinate\n");
+                fclose(file); free(coord); return 1;
+            }
         }
     }
     fclose(file);
@@ -228,12 +288,14 @@ int main(int argc, char *argv[])
     gettimeofday(&Time_point1, NULL);
     // maxDistanceSum : the largest M distance sum
     double *maxDistanceSum = (double *)malloc(sizeof(double) * (M + 1));
+    if (!maxDistanceSum) { fprintf(stderr, "Out of memory\n"); return 1; }
     for (i = 0; i < M; i++)
     {
         maxDistanceSum[i] = 0;
     }
     // maxDisSumPivots : the top M pivots combinations
-    int *maxDisSumPivots = (int *)malloc(sizeof(int) * k * (M + 1));
+    int *maxDisSumPivots = (int *)malloc(sizeof(int) * (size_t)k * (M + 1));
+    if (!maxDisSumPivots) { fprintf(stderr, "Out of memory\n"); return 1; }
     for (i = 0; i < M; i++)
     {
         int ki;
@@ -244,12 +306,14 @@ int main(int argc, char *argv[])
     }
     // minDistanceSum : the smallest M distance sum
     double *minDistanceSum = (double *)malloc(sizeof(double) * (M + 1));
+    if (!minDistanceSum) { fprintf(stderr, "Out of memory\n"); return 1; }
     for (i = 0; i < M; i++)
     {
         minDistanceSum[i] = __DBL_MAX__;
     }
     // minDisSumPivots : the bottom M pivots combinations
-    int *minDisSumPivots = (int *)malloc(sizeof(int) * k * (M + 1));
+    int *minDisSumPivots = (int *)malloc(sizeof(int) * (size_t)k * (M + 1));
+    if (!minDisSumPivots) { fprintf(stderr, "Out of memory\n"); return 1; }
     for (i = 0; i < M; i++)
     {
         int ki;
@@ -263,6 +327,7 @@ int main(int argc, char *argv[])
 
     // temp : indexes of pivots with dummy array head
     int *temp = (int *)malloc(sizeof(int) * (k + 1));
+    if (!temp) { fprintf(stderr, "Out of memory\n"); return 1; }
     temp[0] = -1;
 
     // Build reusable pivot-major distance rows once, not per combination.
@@ -278,6 +343,8 @@ int main(int argc, char *argv[])
                 double delta = coord[p * dim + d] - coord[q * dim + d];
                 squared += delta * delta;
             }
+            if (!isfinite(squared) || squared > __DBL_MAX__ / 4)
+            { fprintf(stderr, "Coordinate range too large\n"); return 1; }
             distances[(size_t)p * n + q] = sqrt(squared);
         }
 
@@ -290,6 +357,7 @@ int main(int argc, char *argv[])
 
     // Store the result
     FILE *out = fopen("result.txt", "w");
+    if (!out) { perror("result.txt"); return 1; }
     for (i = 0; i < M; i++)
     {
         int ki;
