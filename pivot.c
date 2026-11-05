@@ -120,6 +120,75 @@ static double ProjectionSum(double *values, int n)
     return sum;
 }
 
+static void PairProjections(int n, const double *distances, const int *pivots, double *scratch)
+{
+    const double *a = distances + (size_t)pivots[0] * n;
+    const double *b = distances + (size_t)pivots[1] * n;
+    for (int i = 0; i < n; ++i)
+    {
+        scratch[i] = a[i] + b[i];
+        scratch[n + i] = a[i] - b[i];
+    }
+}
+
+// Bounds on the exact scalar absolute-difference sum. Cross-bucket terms
+// depend only on counts and sums; within-bucket terms lie in [0,m^2*range/4].
+static void ProjectionBounds(const double *values, int n, double *lower, double *upper)
+{
+    double minimum = values[0], maximum = values[0];
+    for (int i = 1; i < n; ++i)
+    {
+        if (values[i] < minimum) minimum = values[i];
+        if (values[i] > maximum) maximum = values[i];
+    }
+    double range = maximum - minimum;
+    if (range == 0) { *lower = *upper = 0; return; }
+    double scale = 16.0 / range;
+    if (!isfinite(range) || !isfinite(scale)) { *lower = 0; *upper = INFINITY; return; }
+    unsigned counts[16] = {0};
+    double sums[16] = {0}, minima[16], maxima[16];
+    for (int b = 0; b < 16; ++b) { minima[b] = INFINITY; maxima[b] = -INFINITY; }
+    for (int i = 0; i < n; ++i)
+    {
+        double value = values[i] - minimum;
+        unsigned b = (unsigned)(value * scale);
+        if (b >= 16) b = 15;
+        ++counts[b]; sums[b] += value;
+        if (value < minima[b]) minima[b] = value;
+        if (value > maxima[b]) maxima[b] = value;
+    }
+    long double cross = 0, within = 0, priorSum = 0;
+    unsigned priorCount = 0;
+    for (int b = 0; b < 16; ++b)
+        if (counts[b])
+        {
+            cross += (long double)priorCount * sums[b] - priorSum * counts[b];
+            within += (long double)(counts[b] / 2) * (counts[b] - counts[b] / 2) * (maxima[b] - minima[b]);
+            priorSum += sums[b]; priorCount += counts[b];
+        }
+    // Covers histogram accumulation, translation, arithmetic, conversion and
+    // the original sorted-gap accumulation. Nonfinite bounds always fail open.
+    double error = 128.0 * n * DBL_EPSILON * ((double)n * n * range) + DBL_MIN;
+    *lower = (double)cross - error;
+    *upper = (double)(cross + within) + error;
+}
+
+static int PairScoreIfUseful(int n, const double *distances, const int *pivots,
+                             double *scratch, double maxCut, double minCut, double *score)
+{
+    PairProjections(n, distances, pivots, scratch);
+    if (n >= 64 && maxCut > 0 && minCut < DBL_MAX)
+    {
+        double lo1, hi1, lo2, hi2;
+        ProjectionBounds(scratch, n, &lo1, &hi1);
+        ProjectionBounds(scratch + n, n, &lo2, &hi2);
+        if (isfinite(hi1) && isfinite(hi2) && hi1 + hi2 < maxCut && lo1 + lo2 > minCut)
+            return 0;
+    }
+    *score = ProjectionSum(scratch, n) + ProjectionSum(scratch + n, n);
+    return 1;
+}
+
 // O(n log n) for k=2; O(n^2 k) for the generic fallback.
 double SumDistance(const int k, const int n, const double *distances,
                    const int *pivots, double *rebuiltCoord)
@@ -127,17 +196,9 @@ double SumDistance(const int k, const int n, const double *distances,
     // Pivot-major rows: consecutive j values are consecutive memory accesses.
     if (k == 2)
     {
-        const double *a = distances + (size_t)pivots[0] * n;
-        const double *b = distances + (size_t)pivots[1] * n;
-        // max(|dx|,|dy|) = (|dx+dy| + |dx-dy|)/2.
-        // The ordered-pair factor 2 cancels the identity's factor 1/2.
-        double *plus = rebuiltCoord, *minus = rebuiltCoord + n;
-        for (int i = 0; i < n; ++i)
-        {
-            plus[i] = a[i] + b[i];
-            minus[i] = a[i] - b[i];
-        }
-        return ProjectionSum(plus, n) + ProjectionSum(minus, n);
+        // max(|dx|,|dy|) = (|dx+dy| + |dx-dy|)/2; ordered pairs cancel 1/2.
+        PairProjections(n, distances, pivots, rebuiltCoord);
+        return ProjectionSum(rebuiltCoord, n) + ProjectionSum(rebuiltCoord + n, n);
     }
 
     int i;
@@ -187,6 +248,17 @@ static void InsertRanking(double *scores, int *stored, const int M, const int k,
     memcpy(stored + (size_t)lo * k, pivots, (size_t)k * sizeof(*stored));
 }
 
+// max(A,B) <= sum(max(a_ij,b_ij)) <= A+B for nonnegative distances.
+// Distance rows contain zero; their 1D totals also bound projection magnitudes.
+// The deliberately generous rounding margin makes uncertain cases fail open.
+static int PairMayRank(double a, double b, int n, double maxCut, double minCut)
+{
+    double upper = a + b, lower = a > b ? a : b;
+    double error = 128.0 * n * DBL_EPSILON * upper + DBL_MIN;
+    if (!isfinite(upper) || !isfinite(error)) return 1;
+    return !(upper + error < maxCut && lower - error > minCut);
+}
+
 // Recursive function Combination() : combine pivots and calculate the sum of distance while combining different pivots.
 // ki  : current depth of the recursion
 // k   : number of pivots
@@ -200,7 +272,7 @@ static void InsertRanking(double *scores, int *stored, const int M, const int k,
 // minDistanceSum  : the smallest M distance sum
 // minDisSumPivots : the bottom M pivots combinations
 void Combination(int ki, const int k, const int n, const int M,
-                 const double *distances, double *scratch, int *pivots,
+                 const double *distances, const double *singleScores, double *scratch, int *pivots,
                  double *maxDistanceSum, int *maxDisSumPivots, double *minDistanceSum, int *minDisSumPivots)
 {
     if (ki == k - 1)
@@ -210,8 +282,17 @@ void Combination(int ki, const int k, const int n, const int M,
         {
             pivots[ki] = i;
 
+            if (k == 2 && !PairMayRank(singleScores[pivots[0]], singleScores[pivots[1]], n,
+                                      maxDistanceSum[M - 1], minDistanceSum[M - 1])) continue;
+
             // Calculate sum of distance while combining different pivots.
-            double distanceSum = SumDistance(k, n, distances, pivots, scratch);
+            double distanceSum;
+            if (k == 2)
+            {
+                if (!PairScoreIfUseful(n, distances, pivots, scratch,
+                                      maxDistanceSum[M - 1], minDistanceSum[M - 1], &distanceSum)) continue;
+            }
+            else distanceSum = SumDistance(k, n, distances, pivots, scratch);
 
             InsertRanking(maxDistanceSum, maxDisSumPivots, M, k, distanceSum, pivots, 1);
             InsertRanking(minDistanceSum, minDisSumPivots, M, k, distanceSum, pivots, 0);
@@ -224,7 +305,7 @@ void Combination(int ki, const int k, const int n, const int M,
     for (i = pivots[ki - 1] + 1; i < n; i++)
     {
         pivots[ki] = i;
-        Combination(ki + 1, k, n, M, distances, scratch, pivots, maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
+        Combination(ki + 1, k, n, M, distances, singleScores, scratch, pivots, maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
 
         /** Iteration Log : pivots computed, best pivots, max distance sum, min distance sum pivots, min distance sum
         *** You can delete the logging code. **/
@@ -375,7 +456,18 @@ int main(int argc, char *argv[])
             distances[(size_t)p * n + q] = sqrt(squared);
         }
 
-    Combination(0, k, n, M, distances, scratch, &temp[1], maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
+    double *singleScores = NULL;
+    if (k == 2)
+    {
+        singleScores = malloc(sizeof(double) * (size_t)n);
+        if (!singleScores) { fprintf(stderr, "Out of memory\n"); return 1; }
+        for (int p = 0; p < n; ++p)
+        {
+            memcpy(scratch, distances + (size_t)p * n, sizeof(double) * (size_t)n);
+            singleScores[p] = 2.0 * ProjectionSum(scratch, n);
+        }
+    }
+    Combination(0, k, n, M, distances, singleScores, scratch, &temp[1], maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
 
     // End timing
     struct timeval end;
@@ -434,6 +526,7 @@ int main(int argc, char *argv[])
     // printf("%lf\n", minDistanceSum[i]);
     // }
 
+    free(singleScores);
     free(distances);
     free(scratch);
     free(temp);

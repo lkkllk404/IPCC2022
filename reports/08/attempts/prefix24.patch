@@ -1,0 +1,22 @@
+--- /workspace/HPC/.ipcc-work/step7.c	2026-11-05 22:28:40.774838817 +0800
++++ /workspace/HPC/.ipcc-work/step8-prefix24.c	2026-11-05 22:30:15.187964966 +0800
+@@ -75,8 +75,8 @@
+             varying |= keys[i] ^ keys[0];
+         }
+         uint64_t *source = keys, *target = temporary;
+-        // Sort the high 32 bits first; exact comparisons refine collisions.
+-        for (int shift = 32; shift < 64; shift += 8)
++        // Sort the high 24 bits first; exact comparisons refine collisions.
++        for (int shift = 40; shift < 64; shift += 8)
+         {
+             if (((varying >> shift) & 255) == 0) continue;
+             unsigned counts[256] = {0};
+@@ -98,7 +98,7 @@
+         for (int first = 0; first < n; )
+         {
+             int end = first + 1;
+-            while (end < n && (source[first] >> 32) == (source[end] >> 32)) ++end;
++            while (end < n && (source[first] >> 40) == (source[end] >> 40)) ++end;
+             if (end - first > 1) ComparisonSort(a + first, end - first, depth);
+             first = end;
+         }

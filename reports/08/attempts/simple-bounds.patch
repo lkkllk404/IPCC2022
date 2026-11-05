@@ -1,0 +1,76 @@
+--- /workspace/HPC/.ipcc-work/step7.c	2026-11-05 22:28:40.774838817 +0800
++++ /workspace/HPC/.ipcc-work/step8-simple-bounds.c	2026-11-05 22:37:18.567769634 +0800
+@@ -187,6 +187,17 @@
+     memcpy(stored + (size_t)lo * k, pivots, (size_t)k * sizeof(*stored));
+ }
+ 
++// max(A,B) <= sum(max(a_ij,b_ij)) <= A+B for nonnegative distances.
++// Distance rows contain zero; their 1D totals also bound projection magnitudes.
++// The deliberately generous rounding margin makes uncertain cases fail open.
++static int PairMayRank(double a, double b, int n, double maxCut, double minCut)
++{
++    double upper = a + b, lower = a > b ? a : b;
++    double error = 128.0 * n * DBL_EPSILON * upper + DBL_MIN;
++    if (!isfinite(upper) || !isfinite(error)) return 1;
++    return !(upper + error < maxCut && lower - error > minCut);
++}
++
+ // Recursive function Combination() : combine pivots and calculate the sum of distance while combining different pivots.
+ // ki  : current depth of the recursion
+ // k   : number of pivots
+@@ -200,7 +211,7 @@
+ // minDistanceSum  : the smallest M distance sum
+ // minDisSumPivots : the bottom M pivots combinations
+ void Combination(int ki, const int k, const int n, const int M,
+-                 const double *distances, double *scratch, int *pivots,
++                 const double *distances, const double *singleScores, double *scratch, int *pivots,
+                  double *maxDistanceSum, int *maxDisSumPivots, double *minDistanceSum, int *minDisSumPivots)
+ {
+     if (ki == k - 1)
+@@ -210,6 +221,9 @@
+         {
+             pivots[ki] = i;
+ 
++            if (k == 2 && !PairMayRank(singleScores[pivots[0]], singleScores[pivots[1]], n,
++                                      maxDistanceSum[M - 1], minDistanceSum[M - 1])) continue;
++
+             // Calculate sum of distance while combining different pivots.
+             double distanceSum = SumDistance(k, n, distances, pivots, scratch);
+ 
+@@ -224,7 +238,7 @@
+     for (i = pivots[ki - 1] + 1; i < n; i++)
+     {
+         pivots[ki] = i;
+-        Combination(ki + 1, k, n, M, distances, scratch, pivots, maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
++        Combination(ki + 1, k, n, M, distances, singleScores, scratch, pivots, maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
+ 
+         /** Iteration Log : pivots computed, best pivots, max distance sum, min distance sum pivots, min distance sum
+         *** You can delete the logging code. **/
+@@ -375,7 +389,18 @@
+             distances[(size_t)p * n + q] = sqrt(squared);
+         }
+ 
+-    Combination(0, k, n, M, distances, scratch, &temp[1], maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
++    double *singleScores = NULL;
++    if (k == 2)
++    {
++        singleScores = malloc(sizeof(double) * (size_t)n);
++        if (!singleScores) { fprintf(stderr, "Out of memory\n"); return 1; }
++        for (int p = 0; p < n; ++p)
++        {
++            memcpy(scratch, distances + (size_t)p * n, sizeof(double) * (size_t)n);
++            singleScores[p] = 2.0 * ProjectionSum(scratch, n);
++        }
++    }
++    Combination(0, k, n, M, distances, singleScores, scratch, &temp[1], maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
+ 
+     // End timing
+     struct timeval end;
+@@ -434,6 +459,7 @@
+     // printf("%lf\n", minDistanceSum[i]);
+     // }
+ 
++    free(singleScores);
+     free(distances);
+     free(scratch);
+     free(temp);

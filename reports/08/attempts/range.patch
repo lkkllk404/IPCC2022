@@ -1,0 +1,89 @@
+--- /workspace/HPC/.ipcc-work/step7.c	2026-11-05 22:28:40.774838817 +0800
++++ /workspace/HPC/.ipcc-work/step8-range.c	2026-11-05 22:35:13.117884378 +0800
+@@ -59,52 +59,50 @@
+     }
+ }
+ 
+-// Bounded stack workspace; use comparison sort outside this size range.
++// One monotone range partition, followed by exact comparison sorting.
++// Buckets accelerate distribution, never approximate the stored values.
+ static void SortProjection(double *a, int n, int depth)
+ {
+-#if DBL_MANT_DIG == 53 && DBL_MAX_EXP == 1024 && UINT64_MAX == 18446744073709551615ULL
+-    if (sizeof(double) == sizeof(uint64_t) && n >= 64 && n <= 2048)
++    if (n >= 64 && n <= 2048)
+     {
+-        uint64_t keys[2048], temporary[2048];
+-        uint64_t varying = 0;
+-        for (int i = 0; i < n; ++i)
++        double minimum = a[0], maximum = a[0];
++        for (int i = 1; i < n; ++i)
+         {
+-            uint64_t bits;
+-            memcpy(&bits, a + i, sizeof(bits));
+-            keys[i] = bits ^ ((bits >> 63) ? UINT64_MAX : (UINT64_C(1) << 63));
+-            varying |= keys[i] ^ keys[0];
++            if (a[i] < minimum) minimum = a[i];
++            if (a[i] > maximum) maximum = a[i];
+         }
+-        uint64_t *source = keys, *target = temporary;
+-        // Sort the high 32 bits first; exact comparisons refine collisions.
+-        for (int shift = 32; shift < 64; shift += 8)
++        if (minimum == maximum) return;
++        int buckets = n / 4;
++        double range = maximum - minimum;
++        double scale = (double)buckets / range;
++        if (isfinite(range) && isfinite(scale) && range > 0 && scale > 0)
+         {
+-            if (((varying >> shift) & 255) == 0) continue;
+-            unsigned counts[256] = {0};
+-            for (int i = 0; i < n; ++i) ++counts[(source[i] >> shift) & 255];
+-            unsigned offset = 0;
+-            for (int b = 0; b < 256; ++b)
++            double temporary[2048];
++            uint16_t indices[2048];
++            unsigned counts[512] = {0}, offsets[513];
++            for (int i = 0; i < n; ++i)
+             {
+-                unsigned count = counts[b]; counts[b] = offset; offset += count;
++                unsigned b = (unsigned)((a[i] - minimum) * scale);
++                if (b >= (unsigned)buckets) b = (unsigned)buckets - 1;
++                indices[i] = (uint16_t)b;
++                ++counts[b];
+             }
+-            for (int i = 0; i < n; ++i)
+-                target[counts[(source[i] >> shift) & 255]++] = source[i];
+-            uint64_t *swap = source; source = target; target = swap;
+-        }
+-        for (int i = 0; i < n; ++i)
+-        {
+-            uint64_t bits = source[i] ^ ((source[i] >> 63) ? (UINT64_C(1) << 63) : UINT64_MAX);
+-            memcpy(a + i, &bits, sizeof(bits));
+-        }
+-        for (int first = 0; first < n; )
+-        {
+-            int end = first + 1;
+-            while (end < n && (source[first] >> 32) == (source[end] >> 32)) ++end;
+-            if (end - first > 1) ComparisonSort(a + first, end - first, depth);
+-            first = end;
++            offsets[0] = 0;
++            for (int b = 0; b < buckets; ++b)
++            {
++                offsets[b + 1] = offsets[b] + counts[b];
++                counts[b] = offsets[b];
++            }
++            for (int i = 0; i < n; ++i) temporary[counts[indices[i]]++] = a[i];
++            for (int b = 0; b < buckets; ++b)
++            {
++                int count = (int)(offsets[b + 1] - offsets[b]);
++                if (count > 1) ComparisonSort(temporary + offsets[b], count, depth);
++            }
++            memcpy(a, temporary, (size_t)n * sizeof(*a));
++            return;
+         }
+-        return;
+     }
+-#endif
+     ComparisonSort(a, n, depth);
+ }
+ 
