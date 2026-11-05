@@ -1,0 +1,24 @@
+== reports/work/step5-radix8-1.log
+Using time : 2510.580000 ms
+max : 143 351 117761.647418
+min : 83 226 43769.849602
+== reports/work/step5-radix8-2.log
+Using time : 2602.287000 ms
+max : 143 351 117761.647418
+min : 83 226 43769.849602
+== reports/work/step5-radix8-3.log
+Using time : 2532.583000 ms
+max : 143 351 117761.647418
+min : 83 226 43769.849602
+== reports/work/step5-final-1.log
+Using time : 2506.093000 ms
+max : 143 351 117761.647418
+min : 83 226 43769.849602
+== reports/work/step5-final-2.log
+Using time : 2529.025000 ms
+max : 143 351 117761.647418
+min : 83 226 43769.849602
+== reports/work/step5-final-3.log
+Using time : 2512.891000 ms
+max : 143 351 117761.647418
+min : 83 226 43769.849602

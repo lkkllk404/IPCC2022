@@ -4,6 +4,8 @@
 #include <sys/time.h>
 #include <limits.h>
 #include <stdint.h>
+#include <string.h>
+#include <float.h>
 
 static int CompareDouble(const void *a, const void *b)
 {
@@ -13,7 +15,7 @@ static int CompareDouble(const void *a, const void *b)
 
 // Typed comparisons avoid qsort's indirect calls in the common path.
 // Recurse on the smaller partition, with a depth-limited qsort fallback.
-static void SortProjection(double *a, int n, int depth)
+static void ComparisonSort(double *a, int n, int depth)
 {
     while (n > 16)
     {
@@ -39,12 +41,12 @@ static void SortProjection(double *a, int n, int depth)
         int left = j + 1, right = n - i;
         if (left < right)
         {
-            SortProjection(a, left, depth);
+            ComparisonSort(a, left, depth);
             a += i; n = right;
         }
         else
         {
-            SortProjection(a + i, right, depth);
+            ComparisonSort(a + i, right, depth);
             n = left;
         }
     }
@@ -55,6 +57,47 @@ static void SortProjection(double *a, int n, int depth)
         while (j > 0 && a[j - 1] > value) { a[j] = a[j - 1]; --j; }
         a[j] = value;
     }
+}
+
+// Bounded stack workspace; use comparison sort outside this size range.
+static void SortProjection(double *a, int n, int depth)
+{
+#if DBL_MANT_DIG == 53 && DBL_MAX_EXP == 1024 && UINT64_MAX == 18446744073709551615ULL
+    if (sizeof(double) == sizeof(uint64_t) && n >= 64 && n <= 2048)
+    {
+        uint64_t keys[2048], temporary[2048];
+        uint64_t varying = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            uint64_t bits;
+            memcpy(&bits, a + i, sizeof(bits));
+            keys[i] = bits ^ ((bits >> 63) ? UINT64_MAX : (UINT64_C(1) << 63));
+            varying |= keys[i] ^ keys[0];
+        }
+        uint64_t *source = keys, *target = temporary;
+        for (int shift = 0; shift < 64; shift += 8)
+        {
+            if (((varying >> shift) & 255) == 0) continue;
+            unsigned counts[256] = {0};
+            for (int i = 0; i < n; ++i) ++counts[(source[i] >> shift) & 255];
+            unsigned offset = 0;
+            for (int b = 0; b < 256; ++b)
+            {
+                unsigned count = counts[b]; counts[b] = offset; offset += count;
+            }
+            for (int i = 0; i < n; ++i)
+                target[counts[(source[i] >> shift) & 255]++] = source[i];
+            uint64_t *swap = source; source = target; target = swap;
+        }
+        for (int i = 0; i < n; ++i)
+        {
+            uint64_t bits = source[i] ^ ((source[i] >> 63) ? (UINT64_C(1) << 63) : UINT64_MAX);
+            memcpy(a + i, &bits, sizeof(bits));
+        }
+        return;
+    }
+#endif
+    ComparisonSort(a, n, depth);
 }
 
 // Sum over unordered absolute differences of a sorted scalar projection.

@@ -22,6 +22,7 @@ check: pivot reports/work/baseline reports/work/test_score reports/work/test_sor
 	taskset -c $${BENCH_CPU:-100} $(PYTHON) tests/check.py reports/work/baseline ./pivot
 	taskset -c $${BENCH_CPU:-100} reports/work/test_score
 	taskset -c $${BENCH_CPU:-100} reports/work/test_sort
+	taskset -c $${BENCH_CPU:-100} $(PYTHON) tests/check_invalid.py ./pivot
 
 bench: pivot
 	bash reports/benchmark.sh ./pivot current 3

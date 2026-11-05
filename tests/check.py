@@ -12,7 +12,7 @@ import tempfile
 base, candidate = [str(Path(p).resolve()) for p in sys.argv[1:3]]
 rng = random.Random(2022)
 cases = []
-for dim, n, k in [(2, 16, 1), (2, 18, 2), (3, 14, 3), (5, 12, 4), (2, 50, 2)]:
+for dim, n, k in [(2, 1, 1), (2, 2, 2), (2, 16, 1), (2, 18, 2), (3, 14, 3), (5, 12, 4), (2, 50, 2)]:
     cases.append((f'random-{dim}-{n}-{k}', dim, k,
                   [[rng.random() for _ in range(dim)] for _ in range(n)]))
 cases += [('duplicates', 2, 2, [[0., 0.]] * 8),
