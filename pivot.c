@@ -4,31 +4,29 @@
 #include <sys/time.h>
 
 // Calculate sum of distance while combining different pivots. Complexity : O( n^2 )
-double SumDistance(const int k, const int n, const int dim, double *coord, int *pivots)
+double SumDistance(const int k, const int n, const double *distances,
+                   const int *pivots, double *rebuiltCoord)
 {
-    double *rebuiltCoord = (double *)malloc(sizeof(double) * n * k);
-    int i;
-    for (i = 0; i < n * k; i++)
+    // Pivot-major rows: consecutive j values are consecutive memory accesses.
+    if (k == 2)
     {
-        rebuiltCoord[i] = 0;
+        const double *a = distances + (size_t)pivots[0] * n;
+        const double *b = distances + (size_t)pivots[1] * n;
+        double sum = 0;
+        for (int i = 0; i < n; ++i)
+            for (int j = i + 1; j < n; ++j)
+            {
+                double x = fabs(a[i] - a[j]);
+                double y = fabs(b[i] - b[j]);
+                sum += x > y ? x : y;
+            }
+        return 2.0 * sum;
     }
 
-    // Rebuild coordinates. New coordinate of one point is its distance to each pivot.
-    for (i = 0; i < n; i++)
-    {
-        int ki;
-        for (ki = 0; ki < k; ki++)
-        {
-            double distance = 0;
-            int pivoti = pivots[ki];
-            int j;
-            for (j = 0; j < dim; j++)
-            {
-                distance += pow(coord[pivoti * dim + j] - coord[i * dim + j], 2);
-            }
-            rebuiltCoord[i * k + ki] = sqrt(distance);
-        }
-    }
+    int i;
+    for (i = 0; i < n; ++i)
+        for (int p = 0; p < k; ++p)
+            rebuiltCoord[i * k + p] = distances[(size_t)pivots[p] * n + i];
 
     // Calculate the sum of Chebyshev distance with rebuilt coordinates between every points
     double chebyshevSum = 0;
@@ -49,8 +47,6 @@ double SumDistance(const int k, const int n, const int dim, double *coord, int *
         }
     }
 
-    free(rebuiltCoord);
-
     return 2.0 * chebyshevSum;
 }
 
@@ -66,7 +62,8 @@ double SumDistance(const int k, const int n, const int dim, double *coord, int *
 // maxDisSumPivots : the top M pivots combinations
 // minDistanceSum  : the smallest M distance sum
 // minDisSumPivots : the bottom M pivots combinations
-void Combination(int ki, const int k, const int n, const int dim, const int M, double *coord, int *pivots,
+void Combination(int ki, const int k, const int n, const int M,
+                 const double *distances, double *scratch, int *pivots,
                  double *maxDistanceSum, int *maxDisSumPivots, double *minDistanceSum, int *minDisSumPivots)
 {
     if (ki == k - 1)
@@ -77,7 +74,7 @@ void Combination(int ki, const int k, const int n, const int dim, const int M, d
             pivots[ki] = i;
 
             // Calculate sum of distance while combining different pivots.
-            double distanceSum = SumDistance(k, n, dim, coord, pivots);
+            double distanceSum = SumDistance(k, n, distances, pivots, scratch);
 
             // put data at the end of array
             maxDistanceSum[M] = distanceSum;
@@ -134,7 +131,7 @@ void Combination(int ki, const int k, const int n, const int dim, const int M, d
     for (i = pivots[ki - 1] + 1; i < n; i++)
     {
         pivots[ki] = i;
-        Combination(ki + 1, k, n, dim, M, coord, pivots, maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
+        Combination(ki + 1, k, n, M, distances, scratch, pivots, maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
 
         /** Iteration Log : pivots computed, best pivots, max distance sum, min distance sum pivots, min distance sum
         *** You can delete the logging code. **/
@@ -252,8 +249,23 @@ int main(int argc, char *argv[])
     int *temp = (int *)malloc(sizeof(int) * (k + 1));
     temp[0] = -1;
 
-    // Main loop. Combine different pivots with recursive function and evaluate them. Complexity : O( n^(k+2) )
-    Combination(0, k, n, dim, M, coord, &temp[1], maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
+    // Build reusable pivot-major distance rows once, not per combination.
+    double *distances = malloc(sizeof(double) * (size_t)n * n);
+    double *scratch = malloc(sizeof(double) * (size_t)n * k);
+    if (!distances || !scratch) { fprintf(stderr, "Out of memory\n"); return 1; }
+    for (int p = 0; p < n; ++p)
+        for (int q = 0; q < n; ++q)
+        {
+            double squared = 0;
+            for (int d = 0; d < dim; ++d)
+            {
+                double delta = coord[p * dim + d] - coord[q * dim + d];
+                squared += delta * delta;
+            }
+            distances[(size_t)p * n + q] = sqrt(squared);
+        }
+
+    Combination(0, k, n, M, distances, scratch, &temp[1], maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
 
     // End timing
     struct timeval end;
@@ -311,5 +323,13 @@ int main(int argc, char *argv[])
     // printf("%lf\n", minDistanceSum[i]);
     // }
 
+    free(distances);
+    free(scratch);
+    free(temp);
+    free(coord);
+    free(maxDistanceSum);
+    free(minDistanceSum);
+    free(maxDisSumPivots);
+    free(minDisSumPivots);
     return 0;
 }
