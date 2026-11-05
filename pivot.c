@@ -35,7 +35,8 @@ double SumDistance(const int k, const int n, const int dim, double *coord, int *
     for (i = 0; i < n; i++)
     {
         int j;
-        for (j = 0; j < n; j++)
+        // Unordered pairs suffice: d(i,j) == d(j,i), d(i,i) == 0.
+        for (j = i + 1; j < n; j++)
         {
             double chebyshev = 0;
             int ki;
@@ -50,7 +51,7 @@ double SumDistance(const int k, const int n, const int dim, double *coord, int *
 
     free(rebuiltCoord);
 
-    return chebyshevSum;
+    return 2.0 * chebyshevSum;
 }
 
 // Recursive function Combination() : combine pivots and calculate the sum of distance while combining different pivots.
@@ -279,7 +280,7 @@ int main(int argc, char *argv[])
         }
         fprintf(out, "%d\n", minDisSumPivots[i * k + k - 1]);
     }
-    fclose(file);
+    fclose(out);
 
     // Log
     int ki;
