@@ -159,6 +159,26 @@ double SumDistance(const int k, const int n, const double *distances,
     return 2.0 * chebyshevSum;
 }
 
+// Strict admission and upper-bound insertion preserve the legacy stable ties.
+static void InsertRanking(double *scores, int *stored, const int M, const int k,
+                          double score, const int *pivots, int descending)
+{
+    if (descending ? score <= scores[M - 1] : score >= scores[M - 1]) return;
+    int lo = 0, hi = M;
+    while (lo < hi)
+    {
+        int mid = lo + (hi - lo) / 2;
+        if (descending ? score > scores[mid] : score < scores[mid]) hi = mid;
+        else lo = mid + 1;
+    }
+    size_t count = (size_t)(M - lo - 1);
+    memmove(scores + lo + 1, scores + lo, count * sizeof(*scores));
+    memmove(stored + (size_t)(lo + 1) * k, stored + (size_t)lo * k,
+            count * k * sizeof(*stored));
+    scores[lo] = score;
+    memcpy(stored + (size_t)lo * k, pivots, (size_t)k * sizeof(*stored));
+}
+
 // Recursive function Combination() : combine pivots and calculate the sum of distance while combining different pivots.
 // ki  : current depth of the recursion
 // k   : number of pivots
@@ -185,52 +205,8 @@ void Combination(int ki, const int k, const int n, const int M,
             // Calculate sum of distance while combining different pivots.
             double distanceSum = SumDistance(k, n, distances, pivots, scratch);
 
-            // put data at the end of array
-            maxDistanceSum[M] = distanceSum;
-            minDistanceSum[M] = distanceSum;
-            int kj;
-            for (kj = 0; kj < k; kj++)
-            {
-                maxDisSumPivots[M * k + kj] = pivots[kj];
-            }
-            for (kj = 0; kj < k; kj++)
-            {
-                minDisSumPivots[M * k + kj] = pivots[kj];
-            }
-            // sort
-            int a;
-            for (a = M; a > 0; a--)
-            {
-                if (maxDistanceSum[a] > maxDistanceSum[a - 1])
-                {
-                    double temp = maxDistanceSum[a];
-                    maxDistanceSum[a] = maxDistanceSum[a - 1];
-                    maxDistanceSum[a - 1] = temp;
-                    int kj;
-                    for (kj = 0; kj < k; kj++)
-                    {
-                        int temp = maxDisSumPivots[a * k + kj];
-                        maxDisSumPivots[a * k + kj] = maxDisSumPivots[(a - 1) * k + kj];
-                        maxDisSumPivots[(a - 1) * k + kj] = temp;
-                    }
-                }
-            }
-            for (a = M; a > 0; a--)
-            {
-                if (minDistanceSum[a] < minDistanceSum[a - 1])
-                {
-                    double temp = minDistanceSum[a];
-                    minDistanceSum[a] = minDistanceSum[a - 1];
-                    minDistanceSum[a - 1] = temp;
-                    int kj;
-                    for (kj = 0; kj < k; kj++)
-                    {
-                        int temp = minDisSumPivots[a * k + kj];
-                        minDisSumPivots[a * k + kj] = minDisSumPivots[(a - 1) * k + kj];
-                        minDisSumPivots[(a - 1) * k + kj] = temp;
-                    }
-                }
-            }
+            InsertRanking(maxDistanceSum, maxDisSumPivots, M, k, distanceSum, pivots, 1);
+            InsertRanking(minDistanceSum, minDisSumPivots, M, k, distanceSum, pivots, 0);
         }
         return;
     }

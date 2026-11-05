@@ -1,0 +1,27 @@
+gcc -O3 -march=native -Wall -Wextra pivot.c -lm -o pivot
+mkdir -p reports/work
+gcc -O3 -march=native -Wall -Wextra tests/test_score.c -lm -o reports/work/test_score
+mkdir -p reports/work
+gcc -O3 -march=native -Wall -Wextra tests/test_sort.c -lm -o reports/work/test_sort
+mkdir -p reports/work
+gcc -O3 -march=native -Wall -Wextra tests/test_ranking.c -lm -o reports/work/test_ranking
+taskset -c ${BENCH_CPU:-100} /opt/anaconda3/bin/python tests/check.py reports/work/baseline ./pivot
+PASS random-2-1-1: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-2-2-2: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-2-16-1: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-2-18-2: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-3-14-3: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-5-12-4: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-2-50-2: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS duplicates: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS grid: all 2000 ranks, valid/unique combinations; byte-identical=False
+PASS line: all 2000 ranks, valid/unique combinations; byte-identical=True
+All differential checks passed (tolerance only for floating-point equal-score ties).
+taskset -c ${BENCH_CPU:-100} reports/work/test_score
+PASS 945 direct score comparisons (long-double reference, scales 1e-12..1e12).
+taskset -c ${BENCH_CPU:-100} reports/work/test_sort
+PASS 112 sorting cases: random/sorted/reversed/equal/repeated/organ-pipe/extremes/mixed-exponents, n=0..16384.
+taskset -c ${BENCH_CPU:-100} reports/work/test_ranking
+PASS 120000 ranking updates, exact legacy scores and stable-tie IDs (M=1/8/1000, k=1..4).
+taskset -c ${BENCH_CPU:-100} /opt/anaconda3/bin/python tests/check_invalid.py ./pivot
+PASS 11 invalid-input/output-error cases (rejected without crash).

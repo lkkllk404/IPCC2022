@@ -18,10 +18,15 @@ reports/work/test_sort: tests/test_sort.c pivot.c
 	mkdir -p reports/work
 	$(CC) $(CFLAGS) $< $(LDLIBS) -o $@
 
-check: pivot reports/work/baseline reports/work/test_score reports/work/test_sort
+reports/work/test_ranking: tests/test_ranking.c pivot.c
+	mkdir -p reports/work
+	$(CC) $(CFLAGS) $< $(LDLIBS) -o $@
+
+check: pivot reports/work/baseline reports/work/test_score reports/work/test_sort reports/work/test_ranking
 	taskset -c $${BENCH_CPU:-100} $(PYTHON) tests/check.py reports/work/baseline ./pivot
 	taskset -c $${BENCH_CPU:-100} reports/work/test_score
 	taskset -c $${BENCH_CPU:-100} reports/work/test_sort
+	taskset -c $${BENCH_CPU:-100} reports/work/test_ranking
 	taskset -c $${BENCH_CPU:-100} $(PYTHON) tests/check_invalid.py ./pivot
 
 bench: pivot
