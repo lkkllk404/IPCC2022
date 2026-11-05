@@ -10,7 +10,7 @@ int main(void)
     const int sizes[] = {1, 2, 17, 64, 500, 2048};
     const double scales[] = {1e-12, 1, 1e12};
     for (int s = 0; s < 6; ++s)
-        for (int mode = 0; mode < 6; ++mode)
+        for (int mode = 0; mode < 8; ++mode)
             for (int t = 0; t < 3; ++t)
             {
                 int n = sizes[s];
@@ -21,7 +21,11 @@ int main(void)
                     double x = (double)(state >> 8) / 16777216.0;
                     a[i] = mode == 0 ? x * scales[t] : mode == 1 ? (double)(i % 7) * scales[t]
                          : mode == 2 ? 0 : mode == 3 ? 1e12 + x * 1e-3
-                         : mode == 4 ? ((i % 2) ? -x : x) * scales[t] : x * DBL_MIN;
+                         : mode == 4 ? ((i % 2) ? -x : x) * scales[t]
+                         : mode == 5 ? x * DBL_MIN
+                         : mode == 6 ? nextafter((double)(i % 17) * scales[t] / 16.0,
+                                                 (i % 2) ? INFINITY : -INFINITY)
+                         : (i == 0 ? scales[t] : x * DBL_EPSILON * scales[t]);
                 }
                 double lower, upper;
                 ProjectionBounds(a, n, &lower, &upper);

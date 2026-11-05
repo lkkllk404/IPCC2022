@@ -146,16 +146,13 @@ static void ProjectionBounds(const double *values, int n, double *lower, double 
     double scale = 16.0 / range;
     if (!isfinite(range) || !isfinite(scale)) { *lower = 0; *upper = INFINITY; return; }
     unsigned counts[16] = {0};
-    double sums[16] = {0}, minima[16], maxima[16];
-    for (int b = 0; b < 16; ++b) { minima[b] = INFINITY; maxima[b] = -INFINITY; }
+    double sums[16] = {0};
     for (int i = 0; i < n; ++i)
     {
         double value = values[i] - minimum;
         unsigned b = (unsigned)(value * scale);
         if (b >= 16) b = 15;
         ++counts[b]; sums[b] += value;
-        if (value < minima[b]) minima[b] = value;
-        if (value > maxima[b]) maxima[b] = value;
     }
     long double cross = 0, within = 0, priorSum = 0;
     unsigned priorCount = 0;
@@ -163,7 +160,9 @@ static void ProjectionBounds(const double *values, int n, double *lower, double 
         if (counts[b])
         {
             cross += (long double)priorCount * sums[b] - priorSum * counts[b];
-            within += (long double)(counts[b] / 2) * (counts[b] - counts[b] / 2) * (maxima[b] - minima[b]);
+            // The uniform bucket width bounds its spread. The rounding
+            // allowance below also covers bucket-edge/index rounding.
+            within += (long double)(counts[b] / 2) * (counts[b] - counts[b] / 2) * (range / 16.0);
             priorSum += sums[b]; priorCount += counts[b];
         }
     // Covers histogram accumulation, translation, arithmetic, conversion and
