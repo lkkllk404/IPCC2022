@@ -3,7 +3,23 @@
 #include <math.h>
 #include <sys/time.h>
 
-// Calculate sum of distance while combining different pivots. Complexity : O( n^2 )
+static int CompareDouble(const void *a, const void *b)
+{
+    double x = *(const double *)a, y = *(const double *)b;
+    return (x > y) - (x < y);
+}
+
+// Sum over unordered absolute differences of a sorted scalar projection.
+static double ProjectionSum(double *values, int n)
+{
+    qsort(values, (size_t)n, sizeof(*values), CompareDouble);
+    double sum = 0;
+    for (int i = 1; i < n; ++i)
+        sum += (double)i * (n - i) * (values[i] - values[i - 1]);
+    return sum;
+}
+
+// O(n log n) for k=2; O(n^2 k) for the generic fallback.
 double SumDistance(const int k, const int n, const double *distances,
                    const int *pivots, double *rebuiltCoord)
 {
@@ -12,15 +28,15 @@ double SumDistance(const int k, const int n, const double *distances,
     {
         const double *a = distances + (size_t)pivots[0] * n;
         const double *b = distances + (size_t)pivots[1] * n;
-        double sum = 0;
+        // max(|dx|,|dy|) = (|dx+dy| + |dx-dy|)/2.
+        // The ordered-pair factor 2 cancels the identity's factor 1/2.
+        double *plus = rebuiltCoord, *minus = rebuiltCoord + n;
         for (int i = 0; i < n; ++i)
-            for (int j = i + 1; j < n; ++j)
-            {
-                double x = fabs(a[i] - a[j]);
-                double y = fabs(b[i] - b[j]);
-                sum += x > y ? x : y;
-            }
-        return 2.0 * sum;
+        {
+            plus[i] = a[i] + b[i];
+            minus[i] = a[i] - b[i];
+        }
+        return ProjectionSum(plus, n) + ProjectionSum(minus, n);
     }
 
     int i;

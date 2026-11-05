@@ -1,0 +1,9 @@
+PASS random-2-16-1: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-2-18-2: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-3-14-3: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-5-12-4: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-2-50-2: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS duplicates: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS grid: all 2000 ranks, valid/unique combinations; byte-identical=False
+PASS line: all 2000 ranks, valid/unique combinations; byte-identical=True
+All differential checks passed (tolerance only for floating-point equal-score ties).
