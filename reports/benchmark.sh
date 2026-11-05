@@ -9,7 +9,7 @@ printf 'date=%s\ncpu=%s\n' "$(date --iso-8601=seconds)" "${BENCH_CPU:-100}"
 uptime
 free -m | head -2
 for ((i=1;i<=repeats;i++)); do
-    /usr/bin/time -f "elapsed=%e rss_kib=%M" -o "reports/work/$label-$i.time" \
+    /usr/bin/time -f "elapsed=%e user=%U sys=%S rss_kib=%M" -o "reports/work/$label-$i.time" \
         timeout 180 taskset -c "${BENCH_CPU:-100}" "$binary" uniformvector-2dim-5h.txt \
         > "reports/work/$label-$i.log"
     cat "reports/work/$label-$i.time"

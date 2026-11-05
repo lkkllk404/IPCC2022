@@ -75,7 +75,8 @@ static void SortProjection(double *a, int n, int depth)
             varying |= keys[i] ^ keys[0];
         }
         uint64_t *source = keys, *target = temporary;
-        for (int shift = 0; shift < 64; shift += 8)
+        // Sort the high 32 bits first; exact comparisons refine collisions.
+        for (int shift = 32; shift < 64; shift += 8)
         {
             if (((varying >> shift) & 255) == 0) continue;
             unsigned counts[256] = {0};
@@ -93,6 +94,13 @@ static void SortProjection(double *a, int n, int depth)
         {
             uint64_t bits = source[i] ^ ((source[i] >> 63) ? (UINT64_C(1) << 63) : UINT64_MAX);
             memcpy(a + i, &bits, sizeof(bits));
+        }
+        for (int first = 0; first < n; )
+        {
+            int end = first + 1;
+            while (end < n && (source[first] >> 32) == (source[end] >> 32)) ++end;
+            if (end - first > 1) ComparisonSort(a + first, end - first, depth);
+            first = end;
         }
         return;
     }
