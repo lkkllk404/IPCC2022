@@ -16,7 +16,7 @@
 |9 / 5d7f228|保守统一桶宽替代逐点桶内极值|0.59|1.17x|104.58x|[09](09.md)|
 |10 / 897b681|AVX 极值扫描、暂存端点桶|0.40|1.43x（同批第 9 轮 0.57s）|154.25x|[10](10.md)|
 
-共享服务器的慢样本均保留。第 11 轮采用 OpenMP 批量评分并按串行顺序合并。[同一 NUMA 节点的完整线程矩阵](11.md#单-numa-线程矩阵后续提交基准)中，最低的内部计时中位数为 **51.34 ms（32 线程）**，同批单线程为 423.12 ms，加速 **8.24x**。64 线程使用同一节点的 32 个物理核和 SMT，中位数为 121.66 ms。
+共享服务器的慢样本均保留。第 11 轮采用 OpenMP 批量评分并按串行顺序合并。[双 NUMA 性能基准](11.md#双-numa-性能基准)中，最低的内部计时中位数为 **34.53 ms（64 个物理核）**，同批单线程为 392.38 ms，加速 **11.36x**。
 
 ## 复现
 
@@ -29,8 +29,9 @@ taskset -c 100 make -B -j1
 make check        # 使用已有 /opt/anaconda3/bin/python；无需第三方包
 make bench        # 默认单线程、CPU100、串行3次，每次严格cmp官方输出
 
-# 在 hzcu-hpct 复测单 NUMA 的完整 1/2/4/8/16/32/64 矩阵
-make -B -j1 bench-threads   # 不要给 make 本身绑单核；脚本逐档设置亲和性
+# 在 hzcu-hpct 复测 1/2/4/8/16/32/64；脚本逐档绑核，不要给 make 本身绑单核
+make -B -j1 bench-report    # 双 NUMA、每物理核一个线程；用于性能报告
+make -B -j1 bench-threads   # 单 NUMA、64 线程使用 SMT；用于提交门禁
 
 # 可选择重跑初始修复版，约62秒/次；不要与其他测试并发
 # taskset -c 100 make reports/work/baseline
@@ -38,6 +39,8 @@ make -B -j1 bench-threads   # 不要给 make 本身绑单核；脚本逐档设�
 ```
 
 `BENCH_CPU` 采用 `taskset` 的 CPU 列表语法；`make PYTHON=<已有conda解释器>` 可更改 Python 路径。`PIVOT_THREADS` 接受 1–64，未设置时为 1，超限直接报错；并行仅用于 k=2。现有 GCC 的 OpenMP 由 `make` 启用。`-march=native` 产物仅面向构建机器，换机器需重新编译。`reports/work/` 忽略临时产物；单档脚本 `reports/benchmark.sh` 在同一工作目录不要并发运行，以免覆盖 `result.txt`。
+
+性能报告只使用 `make bench-report` 数据：除单线程基线外，各档均分到两个 NUMA 节点、每个物理核只用一个线程。每档交替采样 5 次取中位数，保留全部样本；日志在 `reports/work/report-threads.*/`。不把单 NUMA 门禁计时计入性能表。
 
 ## 提交门禁
 

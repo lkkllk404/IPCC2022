@@ -41,4 +41,7 @@ bench: pivot
 bench-threads: pivot
 	$(PYTHON) reports/benchmark_threads.py
 
-.PHONY: check bench bench-threads
+bench-report: pivot
+	$(PYTHON) reports/benchmark_threads.py --report
+
+.PHONY: check bench bench-threads bench-report

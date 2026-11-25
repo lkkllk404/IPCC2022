@@ -1,8 +1,8 @@
-threads	logical_cpus	numa_node	physical_cores	threads_per_core
-1	100	1	1	1
-2	100-101	1	2	1
-4	100-103	1	4	1
-8	100-107	1	8	1
-16	100-115	1	16	1
-32	96-127	1	32	1
-64	32-63,96-127	1	32	2
+threads	logical_cpus	numa_node:thread_count	physical_cores	threads_per_core
+1	100	1:1	1	1
+2	4,100	0:1,1:1	2	1
+4	4-5,100-101	0:2,1:2	4	1
+8	4-7,100-103	0:4,1:4	8	1
+16	4-11,100-107	0:8,1:8	16	1
+32	4-19,100-115	0:16,1:16	32	1
+64	0-31,96-127	0:32,1:32	64	1
