@@ -9,6 +9,32 @@
 #ifdef __AVX__
 #include <immintrin.h>
 #endif
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+enum { MAX_THREADS = 64 };
+
+static int ThreadCount(void)
+{
+    const char *setting = getenv("PIVOT_THREADS");
+    if (!setting) return 1;
+    char *end;
+    long count = strtol(setting, &end, 10);
+    if (end == setting || *end || count < 1 || count > MAX_THREADS)
+    {
+        fprintf(stderr, "PIVOT_THREADS must be an integer between 1 and %d\n", MAX_THREADS);
+        return 0;
+    }
+#ifndef _OPENMP
+    if (count > 1)
+    {
+        fprintf(stderr, "PIVOT_THREADS > 1 requires an OpenMP build\n");
+        return 0;
+    }
+#endif
+    return (int)count;
+}
 
 static int CompareDouble(const void *a, const void *b)
 {
@@ -282,6 +308,74 @@ static int PairMayRank(double a, double b, int n, double maxCut, double minCut)
     return !(upper + error < maxCut && lower - error > minCut);
 }
 
+static int TryPairScore(int n, const double *distances, const double *singleScores,
+                        const int *pivots, double *scratch, double maxCut, double minCut,
+                        double *score)
+{
+    return PairMayRank(singleScores[pivots[0]], singleScores[pivots[1]], n, maxCut, minCut) &&
+           PairScoreIfUseful(n, distances, pivots, scratch, maxCut, minCut, score);
+}
+
+static void PrintIteration(int k, const int *pivots, double maxScore, const int *maxPivots,
+                           double minScore, const int *minPivots)
+{
+    for (int p = 0; p < k; ++p) printf("%d ", pivots[p]);
+    putchar('\t');
+    for (int p = 0; p < k; ++p) printf("%d ", maxPivots[p]);
+    printf("%lf\t", maxScore);
+    for (int p = 0; p < k; ++p) printf("%d ", minPivots[p]);
+    printf("%lf\n", minScore);
+}
+
+#ifdef _OPENMP
+static void ParallelPairs(int n, int M, const double *distances, const double *singleScores,
+                          double *scratch, int threads, double *maxScores, int *maxPivots,
+                          double *minScores, int *minPivots)
+{
+    enum { batchSize = 2048 };
+    struct { int pivots[2], useful; double score; } batch[batchSize];
+    int p = 0, q = 1;
+    while (p < n - 1)
+    {
+        int count = 0;
+        do
+        {
+            batch[count].pivots[0] = p;
+            batch[count++].pivots[1] = q;
+            if (++q == n) q = ++p + 1;
+        } while (count < batchSize && p < n - 1);
+
+        // A batch sees the cutoffs at the end of the previous batch. The max
+        // cutoff can only rise and the min cutoff can only fall, so a stale
+        // cutoff may cause extra scoring, but never discard a useful score.
+        const double maxCut = maxScores[M - 1], minCut = minScores[M - 1];
+        #pragma omp parallel for num_threads(threads) schedule(static) default(none) \
+            shared(batch, count, distances, singleScores, scratch, n, maxCut, minCut)
+        for (int i = 0; i < count; ++i)
+        {
+            double *local = scratch + (size_t)omp_get_thread_num() * n * 2;
+            batch[i].useful = TryPairScore(n, distances, singleScores, batch[i].pivots, local,
+                                           maxCut, minCut, &batch[i].score);
+        }
+
+        // Fold in serial enumeration order to preserve ties and progress logs.
+        for (int i = 0; i < count; ++i)
+        {
+            const int *pivots = batch[i].pivots;
+            if (batch[i].useful)
+            {
+                InsertRanking(maxScores, maxPivots, M, 2, batch[i].score, pivots, 1);
+                InsertRanking(minScores, minPivots, M, 2, batch[i].score, pivots, 0);
+            }
+            if (pivots[1] == n - 1)
+                PrintIteration(2, pivots, maxScores[0], maxPivots, minScores[0], minPivots);
+        }
+    }
+    const int last[] = {n - 1, n - 1};
+    PrintIteration(2, last, maxScores[0], maxPivots, minScores[0], minPivots);
+}
+#endif
+
 // Recursive function Combination() : combine pivots and calculate the sum of distance while combining different pivots.
 // ki  : current depth of the recursion
 // k   : number of pivots
@@ -305,15 +399,12 @@ void Combination(int ki, const int k, const int n, const int M,
         {
             pivots[ki] = i;
 
-            if (k == 2 && !PairMayRank(singleScores[pivots[0]], singleScores[pivots[1]], n,
-                                      maxDistanceSum[M - 1], minDistanceSum[M - 1])) continue;
-
             // Calculate sum of distance while combining different pivots.
             double distanceSum;
             if (k == 2)
             {
-                if (!PairScoreIfUseful(n, distances, pivots, scratch,
-                                      maxDistanceSum[M - 1], minDistanceSum[M - 1], &distanceSum)) continue;
+                if (!TryPairScore(n, distances, singleScores, pivots, scratch,
+                                  maxDistanceSum[M - 1], minDistanceSum[M - 1], &distanceSum)) continue;
             }
             else distanceSum = SumDistance(k, n, distances, pivots, scratch);
 
@@ -330,27 +421,9 @@ void Combination(int ki, const int k, const int n, const int M,
         pivots[ki] = i;
         Combination(ki + 1, k, n, M, distances, singleScores, scratch, pivots, maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
 
-        /** Iteration Log : pivots computed, best pivots, max distance sum, min distance sum pivots, min distance sum
-        *** You can delete the logging code. **/
         if (ki == k - 2)
-        {
-            int kj;
-            for (kj = 0; kj < k; kj++)
-            {
-                printf("%d ", pivots[kj]);
-            }
-            putchar('\t');
-            for (kj = 0; kj < k; kj++)
-            {
-                printf("%d ", maxDisSumPivots[kj]);
-            }
-            printf("%lf\t", maxDistanceSum[0]);
-            for (kj = 0; kj < k; kj++)
-            {
-                printf("%d ", minDisSumPivots[kj]);
-            }
-            printf("%lf\n", minDistanceSum[0]);
-        }
+            PrintIteration(k, pivots, maxDistanceSum[0], maxDisSumPivots,
+                           minDistanceSum[0], minDisSumPivots);
     }
 }
 
@@ -367,6 +440,8 @@ int main(int argc, char *argv[])
         printf("Usage: ./pivot <filename>\n");
         return -1;
     }
+    int threads = ThreadCount();
+    if (!threads) return 1;
     // M : number of combinations to store
     const int M = 1000;
     // dim : dimension of metric space
@@ -388,6 +463,14 @@ int main(int argc, char *argv[])
         (size_t)n > SIZE_MAX / sizeof(double) / (size_t)n)
     {
         fprintf(stderr, "Invalid input dimensions\n");
+        fclose(file);
+        return 1;
+    }
+    if (k != 2) threads = 1;
+    size_t scratchSize = (size_t)n * k;
+    if (scratchSize > SIZE_MAX / sizeof(double) / (size_t)threads)
+    {
+        fprintf(stderr, "Scratch space too large\n");
         fclose(file);
         return 1;
     }
@@ -463,7 +546,7 @@ int main(int argc, char *argv[])
 
     // Build reusable pivot-major distance rows once, not per combination.
     double *distances = malloc(sizeof(double) * (size_t)n * n);
-    double *scratch = malloc(sizeof(double) * (size_t)n * k);
+    double *scratch = malloc(sizeof(double) * scratchSize * (size_t)threads);
     if (!distances || !scratch) { fprintf(stderr, "Out of memory\n"); return 1; }
     for (int p = 0; p < n; ++p)
         for (int q = 0; q < n; ++q)
@@ -490,7 +573,14 @@ int main(int argc, char *argv[])
             singleScores[p] = 2.0 * ProjectionSum(scratch, n);
         }
     }
-    Combination(0, k, n, M, distances, singleScores, scratch, &temp[1], maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
+#ifdef _OPENMP
+    if (threads > 1)
+        ParallelPairs(n, M, distances, singleScores, scratch, threads,
+                      maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
+    else
+#endif
+        Combination(0, k, n, M, distances, singleScores, scratch, &temp[1],
+                    maxDistanceSum, maxDisSumPivots, minDistanceSum, minDisSumPivots);
 
     // End timing
     struct timeval end;

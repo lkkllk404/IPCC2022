@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Run from the repository root; one pinned CPU, serial executions, no GPU.
+# Run from the repository root; repetitions are sequential. Default: one pinned CPU.
 set -euo pipefail
 binary=${1:?binary}
 label=${2:?label}
 repeats=${3:-3}
 mkdir -p reports/work
-printf 'date=%s\ncpu=%s\n' "$(date --iso-8601=seconds)" "${BENCH_CPU:-100}"
+printf 'date=%s\ncpu=%s\nrequested_threads=%s\n' "$(date --iso-8601=seconds)" "${BENCH_CPU:-100}" "${PIVOT_THREADS:-1}"
 uptime
 free -m | head -2
 for ((i=1;i<=repeats;i++)); do

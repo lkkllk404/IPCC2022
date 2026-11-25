@@ -4,7 +4,7 @@ LDLIBS = -lm
 PYTHON = /opt/anaconda3/bin/python
 
 pivot: pivot.c
-	$(CC) $(CFLAGS) $< $(LDLIBS) -o $@
+	$(CC) $(CFLAGS) -fopenmp $< $(LDLIBS) -o $@
 
 reports/work/baseline: tests/baseline.c
 	mkdir -p reports/work
@@ -33,6 +33,7 @@ check: pivot reports/work/baseline reports/work/test_score reports/work/test_sor
 	taskset -c $${BENCH_CPU:-100} reports/work/test_ranking
 	taskset -c $${BENCH_CPU:-100} reports/work/test_bounds
 	taskset -c $${BENCH_CPU:-100} $(PYTHON) tests/check_invalid.py ./pivot
+	taskset -c $${BENCH_CPU:-100} $(PYTHON) tests/check_parallel.py ./pivot
 
 bench: pivot
 	bash reports/benchmark.sh ./pivot current 3
