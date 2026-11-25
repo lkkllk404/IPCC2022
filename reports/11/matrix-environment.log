@@ -1,0 +1,13 @@
+2026-11-25T18:43:19+08:00
+ 18:43:19 up 76 days,  3:34,  9 users,  load average: 7.20, 6.47, 6.30
+               total        used        free      shared  buff/cache   available
+Mem:           503Gi        54Gi        71Gi       128Gi       377Gi       317Gi
+Swap:          8.0Gi       1.2Gi       6.8Gi
+Linux 5.15.0-191-generic (hzcu-hpct) 	11/25/26 	_x86_64_	(128 CPU)
+
+18:43:19    NODE    %usr   %nice    %sys %iowait    %irq   %soft  %steal  %guest  %gnice   %idle
+18:43:20       1    2.03    0.00    1.70    0.00    0.00    0.00    0.00    1.92    0.00   94.25
+
+Average:    NODE    %usr   %nice    %sys %iowait    %irq   %soft  %steal  %guest  %gnice   %idle
+Average:       1    2.03    0.00    1.70    0.00    0.00    0.00    0.00    1.92    0.00   94.25
+OMP_PLACES=threads OMP_PROC_BIND=close OMP_WAIT_POLICY=PASSIVE OMP_DYNAMIC=FALSE

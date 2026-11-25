@@ -38,4 +38,7 @@ check: pivot reports/work/baseline reports/work/test_score reports/work/test_sor
 bench: pivot
 	bash reports/benchmark.sh ./pivot current 3
 
-.PHONY: check bench
+bench-threads: pivot
+	$(PYTHON) reports/benchmark_threads.py
+
+.PHONY: check bench bench-threads

@@ -16,11 +16,11 @@
 |9 / 5d7f228|保守统一桶宽替代逐点桶内极值|0.59|1.17x|104.58x|[09](09.md)|
 |10 / 897b681|AVX 极值扫描、暂存端点桶|0.40|1.43x（同批第 9 轮 0.57s）|154.25x|[10](10.md)|
 
-共享服务器的慢样本均保留。第 11 轮采用 OpenMP 批量评分并按串行顺序合并：本轮同一二进制的内部计时中位数为 **397.77 ms（1 线程）→ 84.25 ms（8 线程）**，加速 **4.72x**；更多线程数的样本和资源数据见 [第 11 轮报告](11.md)。
+共享服务器的慢样本均保留。第 11 轮采用 OpenMP 批量评分并按串行顺序合并。[同一 NUMA 节点的完整线程矩阵](11.md#单-numa-线程矩阵后续提交基准)中，最低的内部计时中位数为 **51.34 ms（32 线程）**，同批单线程为 423.12 ms，加速 **8.24x**。64 线程使用同一节点的 32 个物理核和 SMT，中位数为 121.66 ms。
 
 ## 复现
 
-每次开始测试前先检查 `uptime`、`free -m` 和其他任务占用。默认单线程；官方输入实测 RSS < 5 MiB。增大线程数或输入规模前先评估资源。
+每次开始测试前先检查 `uptime`、`free -m` 和其他任务占用。程序默认单线程；官方输入的线程矩阵实测 RSS < 6 MiB。增大线程数或输入规模前先评估资源。
 
 ```sh
 cd /home/jy/hpc/IPCC2022
@@ -29,16 +29,21 @@ taskset -c 100 make -B -j1
 make check        # 使用已有 /opt/anaconda3/bin/python；无需第三方包
 make bench        # 默认单线程、CPU100、串行3次，每次严格cmp官方输出
 
-# 第 11 轮并行复测示例：选择 4 个空闲、不同物理核的逻辑 CPU
-PIVOT_THREADS=4 BENCH_CPU=100-103 OMP_PROC_BIND=close OMP_PLACES=cores \
-  bash reports/benchmark.sh ./pivot current-t4 5
+# 在 hzcu-hpct 复测单 NUMA 的完整 1/2/4/8/16/32/64 矩阵
+make -B -j1 bench-threads   # 不要给 make 本身绑单核；脚本逐档设置亲和性
 
 # 可选择重跑初始修复版，约62秒/次；不要与其他测试并发
 # taskset -c 100 make reports/work/baseline
 # bash reports/benchmark.sh reports/work/baseline baseline 3
 ```
 
-`BENCH_CPU` 采用 `taskset` 的 CPU 列表语法；`make PYTHON=<已有conda解释器>` 可更改 Python 路径。`PIVOT_THREADS` 接受 1–64，未设置时为 1，超限直接报错；并行仅用于 k=2。现有 GCC 的 OpenMP 由 `make` 启用。`-march=native` 产物仅面向构建机器，换机器需重新编译。`reports/work/` 忽略临时产物；同一工作目录的复测不要并发，以免覆盖 `result.txt`。
+`BENCH_CPU` 采用 `taskset` 的 CPU 列表语法；`make PYTHON=<已有conda解释器>` 可更改 Python 路径。`PIVOT_THREADS` 接受 1–64，未设置时为 1，超限直接报错；并行仅用于 k=2。现有 GCC 的 OpenMP 由 `make` 启用。`-march=native` 产物仅面向构建机器，换机器需重新编译。`reports/work/` 忽略临时产物；单档脚本 `reports/benchmark.sh` 在同一工作目录不要并发运行，以免覆盖 `result.txt`。
+
+## 提交门禁
+
+**每个后续提交（含纯文档）都要通过完整线程矩阵，不允许跳过。** `make bench-threads` 使用官方 500 点输入，每档交替跑 5 次，共 35 次计时，每次逐字节比对参考输出。脚本记录系统占用并验证亲和性：所有档位固定在 `hzcu-hpct` 的 NUMA 1，1–32 线程每核一个，64 线程每核两个。每次运行超时 4 秒，同一检出不并跑两组矩阵；本次实际运行 RSS < 6 MiB。手动复测的计时与日志在 `reports/work/threads.*/`。
+
+当前服务器检出已启用版本化 Git 钩子。新检出需先运行 `git config --local core.hooksPath .githooks`。普通提交和自动合并提交会重新构建并测试 Git **暂存树**，失败则阻止提交。机器不满足拓扑或测试条件时不要提交，也不要用 `--no-verify`；重写历史等不触发钩子的操作也须逐提交复测（例如 `git rebase --exec 'make -B -j1 bench-threads'`）。钩子日志及被测 tree ID 在 `reports/work/pre-commit-threads.*/`。
 
 ## 保证范围
 

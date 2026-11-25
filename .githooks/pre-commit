@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Test exactly the tree Git is about to commit, not unstaged work.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+mkdir -p reports/work
+log=$(mktemp -d "$PWD/reports/work/pre-commit-threads.XXXXXX")
+snapshot=$(mktemp -d)
+trap 'rm -rf -- "$snapshot"' EXIT
+tree=$(git write-tree)
+printf '%s\n' "$tree" >"$log/tree"
+git archive "$tree" | tar -xf - -C "$snapshot"
+BENCH_THREADS_LOG_DIR="$log" make -C "$snapshot" -j1 bench-threads
