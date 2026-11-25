@@ -7,9 +7,9 @@ int main(void)
 {
     unsigned state = 2022;
     int checked = 0, skipped = 0;
-    const int sizes[] = {1, 2, 17, 64, 500, 2048};
+    const int sizes[] = {1, 2, 17, 64, 65, 66, 67, 500, 2048};
     const double scales[] = {1e-12, 1, 1e12};
-    for (int s = 0; s < 6; ++s)
+    for (size_t s = 0; s < sizeof(sizes) / sizeof(sizes[0]); ++s)
         for (int mode = 0; mode < 8; ++mode)
             for (int t = 0; t < 3; ++t)
             {

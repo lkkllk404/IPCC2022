@@ -6,6 +6,9 @@
 #include <stdint.h>
 #include <string.h>
 #include <float.h>
+#ifdef __AVX__
+#include <immintrin.h>
+#endif
 
 static int CompareDouble(const void *a, const void *b)
 {
@@ -136,7 +139,26 @@ static void PairProjections(int n, const double *distances, const int *pivots, d
 static void ProjectionBounds(const double *values, int n, double *lower, double *upper)
 {
     double minimum = values[0], maximum = values[0];
-    for (int i = 1; i < n; ++i)
+    int i = 0;
+#ifdef __AVX__
+    // Values are finite by construction; vector min/max needs no fast-math.
+    __m256d lo = _mm256_set1_pd(minimum), hi = lo;
+    for (; i <= n - 4; i += 4)
+    {
+        __m256d x = _mm256_loadu_pd(values + i);
+        lo = _mm256_min_pd(lo, x);
+        hi = _mm256_max_pd(hi, x);
+    }
+    double lows[4], highs[4];
+    _mm256_storeu_pd(lows, lo);
+    _mm256_storeu_pd(highs, hi);
+    for (int lane = 0; lane < 4; ++lane)
+    {
+        if (lows[lane] < minimum) minimum = lows[lane];
+        if (highs[lane] > maximum) maximum = highs[lane];
+    }
+#endif
+    for (; i < n; ++i)
     {
         if (values[i] < minimum) minimum = values[i];
         if (values[i] > maximum) maximum = values[i];
@@ -145,15 +167,17 @@ static void ProjectionBounds(const double *values, int n, double *lower, double 
     if (range == 0) { *lower = *upper = 0; return; }
     double scale = 16.0 / range;
     if (!isfinite(range) || !isfinite(scale)) { *lower = 0; *upper = INFINITY; return; }
-    unsigned counts[16] = {0};
-    double sums[16] = {0};
+    unsigned counts[17] = {0};
+    double sums[17] = {0};
     for (int i = 0; i < n; ++i)
     {
         double value = values[i] - minimum;
+        // value <= range, so the rounded product is nonnegative and < 17.
+        // Collect the upper endpoint separately instead of clamping each index.
         unsigned b = (unsigned)(value * scale);
-        if (b >= 16) b = 15;
         ++counts[b]; sums[b] += value;
     }
+    counts[15] += counts[16]; sums[15] += sums[16];
     long double cross = 0, within = 0, priorSum = 0;
     unsigned priorCount = 0;
     for (int b = 0; b < 16; ++b)
