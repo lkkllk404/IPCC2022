@@ -332,9 +332,13 @@ static void ParallelPairs(int n, int M, const double *distances, const double *s
                           double *scratch, int threads, double *maxScores, int *maxPivots,
                           double *minScores, int *minPivots)
 {
-    enum { batchSize = 2048 };
+    enum { firstBatch = 2048, pairsPerThread = 128 };
+    // Keep the warm-up short so both cutoffs become useful early. Then use
+    // wider batches on large teams to amortize team wakeups and joins.
+    int batchSize = threads * pairsPerThread;
+    if (batchSize < firstBatch) batchSize = firstBatch;
     struct { int pivots[2], useful; double score; } batch[batchSize];
-    int p = 0, q = 1;
+    int p = 0, q = 1, limit = firstBatch;
     while (p < n - 1)
     {
         int count = 0;
@@ -343,19 +347,22 @@ static void ParallelPairs(int n, int M, const double *distances, const double *s
             batch[count].pivots[0] = p;
             batch[count++].pivots[1] = q;
             if (++q == n) q = ++p + 1;
-        } while (count < batchSize && p < n - 1);
+        } while (count < limit && p < n - 1);
+        limit = batchSize;
 
         // A batch sees the cutoffs at the end of the previous batch. The max
         // cutoff can only rise and the min cutoff can only fall, so a stale
         // cutoff may cause extra scoring, but never discard a useful score.
         const double maxCut = maxScores[M - 1], minCut = minScores[M - 1];
-        #pragma omp parallel for num_threads(threads) schedule(static) default(none) \
+        #pragma omp parallel num_threads(threads) default(none) \
             shared(batch, count, distances, singleScores, scratch, n, maxCut, minCut)
-        for (int i = 0; i < count; ++i)
         {
             double *local = scratch + (size_t)omp_get_thread_num() * n * 2;
-            batch[i].useful = TryPairScore(n, distances, singleScores, batch[i].pivots, local,
-                                           maxCut, minCut, &batch[i].score);
+            // Cyclic chunks spread expensive exact scores across the team.
+            #pragma omp for schedule(static, 8) nowait
+            for (int i = 0; i < count; ++i)
+                batch[i].useful = TryPairScore(n, distances, singleScores, batch[i].pivots, local,
+                                               maxCut, minCut, &batch[i].score);
         }
 
         // Fold in serial enumeration order to preserve ties and progress logs.
@@ -425,6 +432,22 @@ void Combination(int ki, const int k, const int n, const int M,
             PrintIteration(k, pivots, maxDistanceSum[0], maxDisSumPivots,
                            minDistanceSum[0], minDisSumPivots);
     }
+}
+
+static int DistanceRow(int p, int n, int dim, const double *coord, double *row)
+{
+    for (int q = 0; q < n; ++q)
+    {
+        double squared = 0;
+        for (int d = 0; d < dim; ++d)
+        {
+            double delta = coord[p * dim + d] - coord[q * dim + d];
+            squared += delta * delta;
+        }
+        if (!isfinite(squared) || squared > DBL_MAX / 4) return 0;
+        row[q] = sqrt(squared);
+    }
+    return 1;
 }
 
 int main(int argc, char *argv[])
@@ -548,31 +571,35 @@ int main(int argc, char *argv[])
     double *distances = malloc(sizeof(double) * (size_t)n * n);
     double *scratch = malloc(sizeof(double) * scratchSize * (size_t)threads);
     if (!distances || !scratch) { fprintf(stderr, "Out of memory\n"); return 1; }
-    for (int p = 0; p < n; ++p)
-        for (int q = 0; q < n; ++q)
-        {
-            double squared = 0;
-            for (int d = 0; d < dim; ++d)
-            {
-                double delta = coord[p * dim + d] - coord[q * dim + d];
-                squared += delta * delta;
-            }
-            if (!isfinite(squared) || squared > __DBL_MAX__ / 4)
-            { fprintf(stderr, "Coordinate range too large\n"); return 1; }
-            distances[(size_t)p * n + q] = sqrt(squared);
-        }
-
     double *singleScores = NULL;
     if (k == 2)
     {
         singleScores = malloc(sizeof(double) * (size_t)n);
         if (!singleScores) { fprintf(stderr, "Out of memory\n"); return 1; }
-        for (int p = 0; p < n; ++p)
+    }
+    // Each worker builds disjoint rows and computes their single-pivot cuts
+    // while the row is hot, reusing the scratch it will use for scoring pairs.
+    int valid = 1;
+#ifdef _OPENMP
+    #pragma omp parallel for if(threads > 1 && n >= 64) num_threads(threads) schedule(static) \
+        default(none) shared(n, dim, coord, distances, singleScores, scratch, scratchSize, threads) \
+        reduction(&:valid)
+#endif
+    for (int p = 0; p < n; ++p)
+    {
+        double *row = distances + (size_t)p * n;
+        if (!DistanceRow(p, n, dim, coord, row)) { valid = 0; continue; }
+        if (singleScores)
         {
-            memcpy(scratch, distances + (size_t)p * n, sizeof(double) * (size_t)n);
-            singleScores[p] = 2.0 * ProjectionSum(scratch, n);
+            double *local = scratch;
+#ifdef _OPENMP
+            if (threads > 1) local += (size_t)omp_get_thread_num() * scratchSize;
+#endif
+            memcpy(local, row, sizeof(double) * (size_t)n);
+            singleScores[p] = 2.0 * ProjectionSum(local, n);
         }
     }
+    if (!valid) { fprintf(stderr, "Coordinate range too large\n"); return 1; }
 #ifdef _OPENMP
     if (threads > 1)
         ParallelPairs(n, M, distances, singleScores, scratch, threads,

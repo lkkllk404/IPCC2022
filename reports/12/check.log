@@ -1,0 +1,56 @@
+mkdir -p reports/work
+gcc -O3 -march=native -Wall -Wextra tests/baseline.c -lm -o reports/work/baseline
+tests/baseline.c: In function ‘main’:
+tests/baseline.c:191:5: warning: ignoring return value of ‘fscanf’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+  191 |     fscanf(file, "%d", &dim);
+      |     ^~~~~~~~~~~~~~~~~~~~~~~~
+tests/baseline.c:192:5: warning: ignoring return value of ‘fscanf’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+  192 |     fscanf(file, "%d", &n);
+      |     ^~~~~~~~~~~~~~~~~~~~~~
+tests/baseline.c:193:5: warning: ignoring return value of ‘fscanf’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+  193 |     fscanf(file, "%d", &k);
+      |     ^~~~~~~~~~~~~~~~~~~~~~
+tests/baseline.c:204:13: warning: ignoring return value of ‘fscanf’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+  204 |             fscanf(file, "%lf", &coord[i * dim + j]);
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+mkdir -p reports/work
+gcc -O3 -march=native -Wall -Wextra tests/test_score.c -lm -o reports/work/test_score
+mkdir -p reports/work
+gcc -O3 -march=native -Wall -Wextra tests/test_sort.c -lm -o reports/work/test_sort
+mkdir -p reports/work
+gcc -O3 -march=native -Wall -Wextra tests/test_ranking.c -lm -o reports/work/test_ranking
+mkdir -p reports/work
+gcc -O3 -march=native -Wall -Wextra tests/test_bounds.c -lm -o reports/work/test_bounds
+taskset -c ${BENCH_CPU:-100} /opt/anaconda3/bin/python tests/check.py reports/work/baseline ./pivot
+PASS random-2-1-1: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-2-2-2: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-2-16-1: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-2-18-2: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-3-14-3: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-5-12-4: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS random-2-50-2: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS duplicates: all 2000 ranks, valid/unique combinations; byte-identical=True
+PASS grid: all 2000 ranks, valid/unique combinations; byte-identical=False
+PASS line: all 2000 ranks, valid/unique combinations; byte-identical=True
+All differential checks passed (tolerance only for floating-point equal-score ties).
+taskset -c ${BENCH_CPU:-100} reports/work/test_score
+PASS 945 direct score comparisons (long-double reference, scales 1e-12..1e12).
+taskset -c ${BENCH_CPU:-100} reports/work/test_sort
+PASS 140 sorting cases: random/sorted/reversed/equal/repeated/organ-pipe/extremes/mixed-exponents/prefix-collisions, n=0..16384.
+taskset -c ${BENCH_CPU:-100} reports/work/test_ranking
+PASS 120000 ranking updates, exact legacy scores and stable-tie IDs (M=1/8/1000, k=1..4).
+taskset -c ${BENCH_CPU:-100} reports/work/test_bounds
+PASS 54648 interval/ranking checks; 30684 exact evaluations pruned without changing any score/ID.
+taskset -c ${BENCH_CPU:-100} /opt/anaconda3/bin/python tests/check_invalid.py ./pivot
+PASS 11 invalid-input/output-error cases (rejected without crash).
+taskset -c ${BENCH_CPU:-100} /opt/anaconda3/bin/python tests/check_parallel.py ./pivot
+PASS wide-and-tail-batches: ranks and progress match serial byte-for-byte
+PASS rank-cutoff ties: ranks and progress match serial byte-for-byte
+PASS zero-score placeholders: ranks and progress match serial byte-for-byte
+PASS one pair: ranks and progress match serial byte-for-byte
+PASS generic fallback: ranks and progress match serial byte-for-byte
+PASS PIVOT_THREADS validates 1..64; max request tested with OpenMP limited to 2 threads
+PASS a worker's distance overflow aborts before scoring or writing a result
+Official 64 threads, ASan/UBSan with leak detection, reference cmp passed and no stderr: elapsed=0.17 user=3.05 sys=0.02 rss_kib=20512
+Non-OpenMP official serial reference cmp passed.
+Old/new non-timing stdout matched for all 35 benchmark pairs.
